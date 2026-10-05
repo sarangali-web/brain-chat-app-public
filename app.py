@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import pathlib
 from collections.abc import Mapping
 from typing import Any
 
@@ -25,6 +26,75 @@ DEFAULT_RESET_WEBHOOK_URL = (
     "https://n8n-kczt.srv1629125.hstgr.cloud/webhook/reset-chat"
 )
 DEFAULT_REQUEST_TIMEOUT_SECONDS = 90.0
+
+
+# ---------------------------------------------------------------------------
+# Bootstrap: generate secrets.toml from environment variables
+# ---------------------------------------------------------------------------
+# Streamlit's OAuth internals (st.login / st.user) read [auth] DIRECTLY from
+# .streamlit/secrets.toml — they do not go through st.secrets at runtime.
+# To support deployments without a pre-existing secrets file (Render, Docker,
+# Fly.io, Railway, …) we write the file ourselves at process startup, before
+# st.set_page_config() triggers any Streamlit internals.
+# ---------------------------------------------------------------------------
+
+
+def _escape_toml(value: str) -> str:
+    """Escape backslashes and double-quotes for a TOML basic string."""
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _bootstrap_secrets_from_env() -> None:
+    """Write .streamlit/secrets.toml from env vars if the file is absent."""
+    secrets_path = pathlib.Path(".streamlit/secrets.toml")
+    if secrets_path.exists():
+        return  # already present — nothing to do
+
+    env = os.environ.get
+
+    auth_redirect_uri       = env("AUTH_REDIRECT_URI", "")
+    auth_cookie_secret      = env("AUTH_COOKIE_SECRET", "")
+    auth_client_id          = env("AUTH_CLIENT_ID", "")
+    auth_client_secret      = env("AUTH_CLIENT_SECRET", "")
+    auth_server_metadata    = env(
+        "AUTH_SERVER_METADATA_URL",
+        "https://accounts.google.com/.well-known/openid-configuration",
+    )
+    auth_hd                 = env("AUTH_HD", DEFAULT_ALLOWED_DOMAIN)
+
+    # Only write the file when at least the minimum auth secrets are present.
+    if not all([auth_redirect_uri, auth_cookie_secret, auth_client_id, auth_client_secret]):
+        return
+
+    allowed_domain  = env("APP_ALLOWED_DOMAIN",        DEFAULT_ALLOWED_DOMAIN)
+    chat_url        = env("WEBHOOKS_CHAT_URL",          DEFAULT_CHAT_WEBHOOK_URL)
+    reset_url       = env("WEBHOOKS_RESET_URL",         DEFAULT_RESET_WEBHOOK_URL)
+    timeout         = env("WEBHOOKS_TIMEOUT_SECONDS",   str(int(DEFAULT_REQUEST_TIMEOUT_SECONDS)))
+
+    toml = f"""# Auto-generated from environment variables at startup — do not edit manually.
+[auth]
+redirect_uri          = "{_escape_toml(auth_redirect_uri)}"
+cookie_secret         = "{_escape_toml(auth_cookie_secret)}"
+client_id             = "{_escape_toml(auth_client_id)}"
+client_secret         = "{_escape_toml(auth_client_secret)}"
+server_metadata_url   = "{_escape_toml(auth_server_metadata)}"
+client_kwargs         = {{ "hd" = "{_escape_toml(auth_hd)}", "prompt" = "select_account" }}
+
+[app]
+allowed_domain = "{_escape_toml(allowed_domain)}"
+
+[webhooks]
+chat_url        = "{_escape_toml(chat_url)}"
+reset_url       = "{_escape_toml(reset_url)}"
+timeout_seconds = {timeout}
+"""
+
+    secrets_path.parent.mkdir(parents=True, exist_ok=True)
+    secrets_path.write_text(toml, encoding="utf-8")
+
+
+# Must run before st.set_page_config() so Streamlit's secret loader sees the file.
+_bootstrap_secrets_from_env()
 
 
 st.set_page_config(
