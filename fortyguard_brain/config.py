@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Iterable, Mapping
 from pathlib import Path
@@ -24,6 +25,16 @@ AUTH_ENVIRONMENT_KEYS = {
     "FORTYGUARD_AUTH_SERVER_METADATA_URL": "server_metadata_url",
 }
 
+GOOGLE_METADATA_URL = "https://accounts.google.com/.well-known/openid-configuration"
+
+
+def missing_auth_settings(auth: Mapping[str, Any]) -> list[str]:
+    """Report missing configuration names without revealing credential values."""
+    return [
+        variable for variable, key in AUTH_ENVIRONMENT_KEYS.items()
+        if not isinstance(auth.get(key), str) or not auth[key].strip()
+    ]
+
 AUTH_CLIENT_KWARGS_ENVIRONMENT_KEYS = {
     "FORTYGUARD_AUTH_HOSTED_DOMAIN": "hd",
     "FORTYGUARD_AUTH_PROMPT": "prompt",
@@ -45,9 +56,19 @@ def _mapped_values(
 ) -> dict[str, str]:
     values: dict[str, str] = {}
     for environment_name, setting_name in variable_names.items():
-        value = environ.get(environment_name, "").strip()
-        if value:
-            values[setting_name] = value
+        # Keep the documented name authoritative, while accepting the section
+        # prefix and the original TOML key for platforms configured manually.
+        aliases = (
+            environment_name,
+            environment_name.removeprefix("FORTYGUARD_"),
+            setting_name.upper(),
+            setting_name,
+        )
+        for name in aliases:
+            value = environ.get(name, "").strip()
+            if value:
+                values[setting_name] = value
+                break
     return values
 
 
@@ -59,9 +80,35 @@ def build_environment_secrets(environ: Mapping[str, str]) -> dict[str, Any]:
     client_kwargs = _mapped_values(
         environ, AUTH_CLIENT_KWARGS_ENVIRONMENT_KEYS
     )
-    if client_kwargs:
-        auth["client_kwargs"] = client_kwargs
-    if auth:
+    raw_kwargs = _mapped_values(environ, {
+        "FORTYGUARD_AUTH_CLIENT_KWARGS": "client_kwargs",
+    }).get("client_kwargs")
+    if raw_kwargs:
+        try:
+            try:
+                parsed_kwargs = json.loads(raw_kwargs)
+            except json.JSONDecodeError:
+                try:
+                    import tomllib as toml
+                except ModuleNotFoundError:  # Python 3.10; installed with Streamlit
+                    import toml
+
+                parsed_kwargs = toml.loads("client_kwargs = " + raw_kwargs)["client_kwargs"]
+            if not isinstance(parsed_kwargs, dict):
+                raise ValueError
+        except (ValueError, TypeError, KeyError):
+            raise ValueError(
+                "client_kwargs must be a JSON object or TOML inline table. "
+                'Example: {"hd": "fortyguard.com", "prompt": "select_account"}'
+            ) from None
+        client_kwargs = {**parsed_kwargs, **client_kwargs}
+    if auth or client_kwargs:
+        auth.setdefault("server_metadata_url", GOOGLE_METADATA_URL)
+        auth["client_kwargs"] = {
+            "hd": "fortyguard.com",
+            "prompt": "select_account",
+            **client_kwargs,
+        }
         secrets["auth"] = auth
 
     app = _mapped_values(environ, APP_ENVIRONMENT_KEYS)

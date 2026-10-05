@@ -82,7 +82,8 @@ FORTYGUARD_RESET_WEBHOOK_URL
 FORTYGUARD_REQUEST_TIMEOUT_SECONDS
 ```
 
-The first five variables are required for Google sign-in. Use the deployment's
+The first four variables are required for Google sign-in. Google's metadata URL
+defaults automatically when it is omitted. Use the deployment's
 public callback URL for `FORTYGUARD_AUTH_REDIRECT_URI`, ending exactly in
 `/oauth2callback`, and register the same URL in the matching Google OAuth client.
 The remaining variables are optional because the checked-in defaults preserve the
@@ -105,6 +106,23 @@ authentication settings are installed before OAuth routes begin handling request
 It binds to `0.0.0.0`, uses the platform's `PORT` variable when present, and falls
 back to port 8501 otherwise. Continue using `app.py` as the Streamlit Community
 Cloud entrypoint.
+
+For Render, set the build command to `pip install -r requirements.txt` and the
+start command to `python server.py`. Set `FORTYGUARD_AUTH_REDIRECT_URI` to
+`https://brain-chat-app-public.onrender.com/oauth2callback` and register that exact
+callback in the Google OAuth client. Enter environment values without surrounding
+quotes, then save and redeploy.
+
+The documented `FORTYGUARD_*` names are preferred. The loader also accepts names
+without that prefix (for example `AUTH_CLIENT_ID`) and the original TOML key in
+upper or lower case (`CLIENT_ID` or `client_id`). The documented name wins if
+multiple aliases are set. If authentication settings are missing, the setup screen
+lists their names without showing secret values.
+
+The combined `client_kwargs` environment variable is also supported, as either
+JSON (`{"hd": "fortyguard.com", "prompt": "select_account"}`) or the TOML inline
+table copied from the secrets example. Separate hosted-domain and prompt variables
+take precedence over this combined value.
 
 ## Tests
 

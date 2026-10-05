@@ -11,7 +11,7 @@ from streamlit.errors import (
 )
 
 from fortyguard_brain.auth import get_verified_org_email
-from fortyguard_brain.config import configure_streamlit_secrets
+from fortyguard_brain.config import configure_streamlit_secrets, missing_auth_settings
 from fortyguard_brain.webhooks import WebhookError, reset_chat_memory, send_chat_message
 
 
@@ -65,15 +65,7 @@ def _timeout_setting() -> float:
 
 
 def _auth_is_configured() -> bool:
-    auth = _secret_section("auth")
-    required = (
-        "redirect_uri",
-        "cookie_secret",
-        "client_id",
-        "client_secret",
-        "server_metadata_url",
-    )
-    return all(str(auth.get(key, "")).strip() for key in required)
+    return not missing_auth_settings(_secret_section("auth"))
 
 
 ALLOWED_DOMAIN = _setting("app", "allowed_domain", DEFAULT_ALLOWED_DOMAIN).lower()
@@ -339,6 +331,13 @@ def _render_auth_setup() -> None:
         "Streamlit Secrets, or set the required `FORTYGUARD_AUTH_*` "
         "environment variables, then restart the app."
     )
+    missing = missing_auth_settings(_secret_section("auth"))
+    if missing:
+        st.warning("Missing settings: " + ", ".join(missing))
+        st.caption(
+            "Existing Streamlit secrets files take precedence over environment "
+            "variables. After changing deployment settings, restart the service."
+        )
 
 
 def _sign_out() -> None:
@@ -460,8 +459,13 @@ def main() -> None:
 
     try:
         user_claims = st.user.to_dict()
-    except (StreamlitAuthError, StreamlitMissingAuthlibError):
-        _render_auth_setup()
+    except StreamlitMissingAuthlibError:
+        _render_header()
+        st.error("Google sign-in dependencies are missing. Rebuild using requirements.txt.")
+        st.stop()
+    except StreamlitAuthError:
+        _render_header()
+        st.error("Google sign-in could not initialize. Check the deployment's authentication configuration.")
         st.stop()
 
     if user_claims.get("is_logged_in") is not True:
