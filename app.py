@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from typing import Any
 
@@ -34,18 +35,54 @@ st.set_page_config(
 )
 
 
+# ---------------------------------------------------------------------------
+# Secret / config resolution
+# ---------------------------------------------------------------------------
+# Priority: .streamlit/secrets.toml  >  environment variables  >  hardcoded default
+#
+# Environment variable naming convention:
+#   [auth]     section  ->  AUTH_<KEY>          e.g. AUTH_CLIENT_ID
+#   [app]      section  ->  APP_<KEY>           e.g. APP_ALLOWED_DOMAIN
+#   [webhooks] section  ->  WEBHOOKS_<KEY>      e.g. WEBHOOKS_CHAT_URL
+# ---------------------------------------------------------------------------
+
+
+def _secrets_available() -> bool:
+    """Return True when a secrets.toml file is present and readable."""
+    try:
+        # Accessing any key forces Streamlit to parse the file.
+        _ = st.secrets.get("_probe", None)
+        return True
+    except (StreamlitSecretNotFoundError, FileNotFoundError):
+        return False
+
+
 def _secret_section(name: str) -> Mapping[str, Any]:
-    """Read a Secrets section without making the local setup screen crash."""
+    """Read a [section] from secrets.toml, or return an empty dict on failure."""
     try:
         value = st.secrets.get(name, {})
-    except StreamlitSecretNotFoundError:
+    except (StreamlitSecretNotFoundError, FileNotFoundError):
         return {}
     return value if isinstance(value, Mapping) else {}
 
 
+def _env_key(section: str, key: str) -> str:
+    """Build the canonical environment-variable name for a secrets key."""
+    return f"{section.upper()}_{key.upper()}"
+
+
 def _setting(section: str, key: str, default: str) -> str:
-    value = _secret_section(section).get(key, default)
-    return str(value).strip() or default
+    """Return a config value from secrets.toml first, then env vars, then default."""
+    # 1. Try secrets.toml
+    secrets_value = str(_secret_section(section).get(key, "")).strip()
+    if secrets_value:
+        return secrets_value
+    # 2. Try environment variable  (e.g. WEBHOOKS_CHAT_URL)
+    env_value = os.environ.get(_env_key(section, key), "").strip()
+    if env_value:
+        return env_value
+    # 3. Fall back to the hardcoded default
+    return default
 
 
 def _timeout_setting() -> float:
@@ -60,7 +97,7 @@ def _timeout_setting() -> float:
 
 
 def _auth_is_configured() -> bool:
-    auth = _secret_section("auth")
+    """Return True when all required OAuth keys are present in secrets *or* env vars."""
     required = (
         "redirect_uri",
         "cookie_secret",
@@ -68,7 +105,14 @@ def _auth_is_configured() -> bool:
         "client_secret",
         "server_metadata_url",
     )
-    return all(str(auth.get(key, "")).strip() for key in required)
+    auth = _secret_section("auth")
+    for key in required:
+        # Accept value from secrets.toml OR from the matching env var
+        from_secrets = str(auth.get(key, "")).strip()
+        from_env = os.environ.get(_env_key("auth", key), "").strip()
+        if not from_secrets and not from_env:
+            return False
+    return True
 
 
 ALLOWED_DOMAIN = _setting("app", "allowed_domain", DEFAULT_ALLOWED_DOMAIN).lower()
@@ -330,8 +374,11 @@ def _render_auth_setup() -> None:
     _render_header()
     st.error("Google sign-in has not been configured for this deployment yet.")
     st.info(
-        "Add the `[auth]` values from `.streamlit/secrets.toml.example` to "
-        "Streamlit Secrets, then restart the app."
+        "Provide the `[auth]` values either in `.streamlit/secrets.toml` "
+        "(see `secrets.toml.example`) or as environment variables "
+        "(`AUTH_CLIENT_ID`, `AUTH_CLIENT_SECRET`, `AUTH_REDIRECT_URI`, "
+        "`AUTH_COOKIE_SECRET`, `AUTH_SERVER_METADATA_URL`), "
+        "then restart the app."
     )
 
 
