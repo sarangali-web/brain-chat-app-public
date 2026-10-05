@@ -2,6 +2,8 @@
 __pycache__/
 *.py[codz]
 *$py.class
+secrets.toml
+tests
 
 # C extensions
 *.so
