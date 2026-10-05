@@ -62,6 +62,50 @@ persistent session identifier.
 The webhook URLs, allowed domain, and timeout are configurable in Secrets. Their
 checked-in defaults point to the requested FortyGuard n8n workflows.
 
+## Deploy on another platform
+
+When no Streamlit `secrets.toml` file is present, the app reads its configuration
+from environment variables. Copy the names from `.env.example` into your hosting
+platform's environment or secret manager:
+
+```text
+FORTYGUARD_AUTH_REDIRECT_URI
+FORTYGUARD_AUTH_COOKIE_SECRET
+FORTYGUARD_AUTH_CLIENT_ID
+FORTYGUARD_AUTH_CLIENT_SECRET
+FORTYGUARD_AUTH_SERVER_METADATA_URL
+FORTYGUARD_AUTH_HOSTED_DOMAIN
+FORTYGUARD_AUTH_PROMPT
+FORTYGUARD_ALLOWED_DOMAIN
+FORTYGUARD_CHAT_WEBHOOK_URL
+FORTYGUARD_RESET_WEBHOOK_URL
+FORTYGUARD_REQUEST_TIMEOUT_SECONDS
+```
+
+The first five variables are required for Google sign-in. Use the deployment's
+public callback URL for `FORTYGUARD_AUTH_REDIRECT_URI`, ending exactly in
+`/oauth2callback`, and register the same URL in the matching Google OAuth client.
+The remaining variables are optional because the checked-in defaults preserve the
+current FortyGuard domain, Google sign-in behavior, n8n endpoints, and timeout.
+
+The application reads real process environment variables; it does not load a local
+`.env` file automatically. For local development, either export the variables in
+your shell or continue using `.streamlit/secrets.toml`. If both configuration
+methods are available, `secrets.toml` takes precedence and environment values are
+ignored.
+
+On a generic Python host, use the included launcher as the start command:
+
+```bash
+python server.py
+```
+
+The launcher uses Streamlit's ASGI application API so the environment-backed
+authentication settings are installed before OAuth routes begin handling requests.
+It binds to `0.0.0.0`, uses the platform's `PORT` variable when present, and falls
+back to port 8501 otherwise. Continue using `app.py` as the Streamlit Community
+Cloud entrypoint.
+
 ## Tests
 
 ```bash
@@ -69,5 +113,6 @@ python -m pip install -r requirements-dev.txt
 pytest
 ```
 
-The tests verify strict domain handling, the exact webhook payloads, Markdown
-output handling, and reset confirmation behavior without contacting n8n.
+The tests verify strict domain handling, configuration-source precedence,
+environment-variable mapping, the exact webhook payloads, Markdown output
+handling, and reset confirmation behavior without contacting n8n.

@@ -1,2 +1,2 @@
-streamlit[auth]>=1.60.0,<2.0.0
+streamlit[auth]>=1.65.0,<2.0.0
 requests>=2.32.0,<3.0.0
